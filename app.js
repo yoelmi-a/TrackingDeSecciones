@@ -1,3 +1,4 @@
+import { log } from 'console';
 import puppeteer from 'puppeteer';
 import readline from 'readline';
 
@@ -68,22 +69,22 @@ async function checkAvailability(page, subjects) {
 
                 if (data.inscritos < data.cupo) {
                     console.log(`   ✅ ${data.nombreSeccion} tiene cupos disponibles: ${data.inscritos}/${data.cupo}`);
-                    try{
+                    try {
 
-                    
-                    await page.waitForSelector(data.selectorToClick, {visible: true, timeout: 5000});
-                    await page.click(data.selectorToClick);
-                    console.log(`   ✔️ Se ha seleccionado automáticamente la sección ${data.nombreSeccion}.`);
-                    subjects.splice(i, 1); // Eliminar la materia ya seleccionada
-                    i--;
-                    break;
-                    } catch(e){
+
+                        await page.waitForSelector(data.selectorToClick, { visible: true, timeout: 5000 });
+                        await page.click(data.selectorToClick);
+                        console.log(`   ✔️ Se ha seleccionado automáticamente la sección ${data.nombreSeccion}.`);
+                        subjects.splice(i, 1); // Eliminar la materia ya seleccionada
+                        i--;
+                        break;
+                    } catch (e) {
                         console.error(`   ❌ No se pudo clickear ${data.nombreSeccion} ${data.inscritos}/${data.cupo}. Reintentando...`)
                     } // Salir del bucle for para pasar a la siguiente materia
                 } else {
                     console.log(`   ❌ ${data.nombreSeccion} está llena: ${data.inscritos}/${data.cupo}`);
                 }
-                
+
             }
         }
     } catch (error) {
@@ -100,62 +101,87 @@ async function selectionProcess(userData) {
 
     // Crear nueva página
     const page = await browser.newPage();
-    // Navegar a una URL
-    await page.goto('https://sigeiacademico.itla.edu.do/account/login');
+    let login = false;
+    while (!login) {
+        try {
 
-    // Esperar a que cargue completamente
-    //await page.waitForLoadState('networkidle');
-    await page.waitForNetworkIdle();
+            await page.goto('https://sigeiacademico.itla.edu.do/account/login');
 
-    // Hacer clic en un elemento
+            // Esperar a que cargue completamente
+            await page.waitForNetworkIdle({ timeout: 5000 });
+            // Llenar formularios
+            await page.type('#email', userData.email);
+            await page.type('#password', userData.password);
 
-    // Llenar formularios
-    await page.type('#email', userData.email);
-    await page.type('#password', userData.password);
+            await page.click('#btnLogin');
 
-    await page.click('#btnLogin');
-
-    await page.waitForNavigation();
-    console.log('✅ Inicio de sesión exitoso.')
-    // Buscar por texto usando JavaScript
-    await page.waitForSelector('.btn-lobby-container');
-
-    const clicked = await page.evaluate(() => {
-        // Find all links with the correct class
-        const links = document.querySelectorAll('a.btn-lobby-container');
-        // Iterate through them to find the one with the correct text
-        const targetLink = Array.from(links).find(link => link.textContent.includes('SELECCIÓN DE ASIGNATURAS'));
-
-        if (targetLink) {
-            targetLink.click();
-            return true;
+            console.log('✅ Inicio de sesión exitoso.');
+            login = true;
+        } catch (e) {
+            console.log('❌ No se pudo iniciar sesión. Reintentando...');
+            page.reload();
         }
-        return false;
-    });
+    }
 
-    if (clicked) {
-        console.log('✅ Clic exitoso en "SELECCIÓN DE ASIGNATURAS".');
-    } else {
-        console.log('❌ El botón para seleccionar asignaturas no se pudo encontrar o cliquear.');
+    // Buscar por texto usando JavaScript
+
+    let selectionIsAvailable = false;
+
+    while (!selectionIsAvailable) {
+        try {
+
+            await page.waitForNavigation({ timeout: 5000 });
+            await page.waitForSelector('.btn-lobby-container', { visible: true, timeout: 5000 });
+
+            const clicked = await page.evaluate(() => {
+                // Find all links with the correct class
+                const links = document.querySelectorAll('a.btn-lobby-container');
+                // Iterate through them to find the one with the correct text
+                const targetLink = Array.from(links).find(link => link.textContent.includes('SELECCIÓN DE ASIGNATURAS'));
+
+                if (targetLink) {
+                    targetLink.click();
+                    return true;
+                }
+                return false;
+            });
+
+            if (clicked) {
+                console.log('✅ Clic exitoso en "SELECCIÓN DE ASIGNATURAS".');
+                selectionIsAvailable = true
+            } else {
+                console.log('❌ El botón para seleccionar asignaturas no se pudo encontrar o cliquear.');
+                page.reload();
+            }
+        } catch (e) {
+            console.log('❌ No se pudo abrir el apartado de la selección. Reintentando...');
+            page.reload();
+        }
     }
 
     while (true) {
 
-        if (userData.selections.length > 0) {
+        try {
 
-            for (const selection of userData.selections) {
+            if (userData.selections.length > 0) {
 
-                await page.waitForSelector(`a[href="#cuatrimestre${selection.quarter}"]`);
-                await page.click(`a[href="#cuatrimestre${selection.quarter}"]`);
-                console.log('🔄 Verificando disponibilidad...');
-                await checkAvailability(page, selection.subjects);
-                await page.reload();
+                for (const selection of userData.selections) {
+
+                    await page.waitForSelector(`a[href="#cuatrimestre${selection.quarter}"]`, { visible: true, timeout: 5000 });
+                    await page.click(`a[href="#cuatrimestre${selection.quarter}"]`);
+                    console.log('🔄 Verificando disponibilidad...');
+                    await checkAvailability(page, selection.subjects);
+                    await page.reload();
+                }
             }
-        }
-        else {
-            console.log('✅ Proceso de selección completado. No hay más asignaturas por seleccionar.');
-            await browser.close();
-            process.exit(0);
+            else {
+                console.log('✅ Proceso de selección completado. No hay más asignaturas por seleccionar.');
+                await browser.close();
+                process.exit(0);
+            }
+        } catch (e) {
+            console.log('❌ Ocurrió un error cargando el apartado de la selección. Reintentando...');
+            page.reload();
         }
 
     }
